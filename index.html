@@ -104,20 +104,35 @@
             disableDefaultUI: true // 지도 위 기본 버튼 제거 (깔끔하게)
         });
 
-        // VWorld 지적도 레이어 설정
-// 지적도 레이어 설정 (더 안정적인 주소로 교체)
+// 지적도 레이어 설정 최적화
 landLayer = new google.maps.ImageMapType({
     getTileUrl: function(coord, zoom) {
-        // x, y 좌표 계산 방식 보정
-        const x = coord.x;
-        const y = coord.y;
-        // 최신 브이월드 WMTS 호출 규격
-        return `https://api.vworld.kr/req/wmts/1.0.0/EFCB2642-F3C4-3343-B8E6-F6D7BF27190B/Base/${zoom}/${y}/${x}.png?layer=LP_PA_CBND_BU_EDIT&style=default`;
+        // 지적도는 줌 레벨 12~19 사이에서 가장 잘 보입니다.
+        if (zoom < 7 || zoom > 19) return null; 
+        
+        // VWorld WMTS 최신 표준 호출 (지번 선이 가장 뚜렷한 설정)
+        return `https://api.vworld.kr/req/wmts/1.0.0/EFCB2642-F3C4-3343-B8E6-F6D7BF27190B/LP_PA_CBND_BU_EDIT/${zoom}/${coord.y}/${coord.x}.png`;
     },
     tileSize: new google.maps.Size(256, 256),
-    opacity: 0.6,
+    opacity: 1.0, // 투명도를 1.0으로 높여서 선을 더 진하게 만듭니다.
     isPng: true
 });
+
+// 레이어를 올릴 때 중첩 순서 강제 지정
+function toggleLandLayer() {
+    const btn = document.getElementById("land-btn");
+    if (!isLandLayerVisible) {
+        // 최상단에 레이어 추가
+        map.overlayMapTypes.setAt(0, landLayer);
+        btn.innerText = "🗺️ 지적도 보기: ON";
+        btn.style.background = "#2ecc71";
+    } else {
+        map.overlayMapTypes.removeAt(0);
+        btn.innerText = "🗺️ 지적도 보기: OFF";
+        btn.style.background = "#8e44ad";
+    }
+    isLandLayerVisible = !isLandLayerVisible;
+}
 
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition((pos) => {
