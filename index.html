@@ -67,9 +67,9 @@
         <input id="pac-input" type="text" placeholder="🔍 주소/지번 검색 (예: 종로구 1가)">
     </div>
     <div class="button-grid">
-        <button onclick="undoLastPoint()" class="btn-undo">↩ 취소</button>
-        <button onclick="startTracking()" class="btn-tracking">🚶 추적</button>
-        <button onclick="stopTracking()" class="btn-stop">🛑 종료</button>
+        <button onclick="undoLastPoint()" class="btn-undo">↩ 한단계 취소</button>
+        <button onclick="startTracking()" class="btn-tracking">🚶 걸음 추적</button>
+        <button onclick="stopTracking()" class="btn-stop">🛑 걸음 종료</button>
         <button onclick="saveRecord()" class="btn-save">💾 저장</button>
         
         <button onclick="toggleLandLayer()" class="btn-land" id="land-btn">🗺️ 지적도 보기: OFF</button>
@@ -104,30 +104,52 @@
             disableDefaultUI: true // 지도 위 기본 버튼 제거 (깔끔하게)
         });
 
-// 지적도 레이어 설정 최적화
+// 지적도 레이어 설정 (WMS 방식으로 전면 교체)
 landLayer = new google.maps.ImageMapType({
     getTileUrl: function(coord, zoom) {
-        // 지적도는 줌 레벨 12~19 사이에서 가장 잘 보입니다.
-        if (zoom < 7 || zoom > 19) return null; 
+        const proj = map.getProjection();
+        const zpow = Math.pow(2, zoom);
         
-        // VWorld WMTS 최신 표준 호출 (지번 선이 가장 뚜렷한 설정)
-        return `https://api.vworld.kr/req/wmts/1.0.0/EFCB2642-F3C4-3343-B8E6-F6D7BF27190B/LP_PA_CBND_BU_EDIT/${zoom}/${coord.y}/${coord.x}.png`;
+        // 타일의 좌하단(sw)과 우상단(ne) 좌표 계산
+        const ul = new google.maps.Point(coord.x * 256 / zpow, coord.y * 256 / zpow);
+        const lr = new google.maps.Point((coord.x + 1) * 256 / zpow, (coord.y + 1) * 256 / zpow);
+        
+        const nw = proj.fromPointToLatLng(ul);
+        const se = proj.fromPointToLatLng(lr);
+        
+        // WMS 파라미터 구성 (지적도 전용)
+        const bbox = se.lng() + "," + se.lat() + "," + nw.lng() + "," + nw.lat();
+        
+        return "https://api.vworld.kr/req/wms?" +
+               "SERVICE=WMS&REQUEST=GetMap&V2V=true" +
+               "&LAYERS=LP_PA_CBND_BU_EDIT,LP_PA_CBND_ON_EDIT" + // 지적도 + 지번 레이어
+               "&STYLES=LP_PA_CBND_BU_EDIT,LP_PA_CBND_ON_EDIT" +
+               "&FORMAT=image/png&TRANSPARENT=TRUE" +
+               "&SRS=EPSG:4326" +
+               "&WIDTH=256&HEIGHT=256" +
+               "&BBOX=" + bbox +
+               "&key=EFCB2642-F3C4-3343-B8E6-F6D7BF27190B";
     },
     tileSize: new google.maps.Size(256, 256),
-    opacity: 1.0, // 투명도를 1.0으로 높여서 선을 더 진하게 만듭니다.
     isPng: true
 });
+
 
 // 레이어를 올릴 때 중첩 순서 강제 지정
 function toggleLandLayer() {
     const btn = document.getElementById("land-btn");
+    
     if (!isLandLayerVisible) {
-        // 최상단에 레이어 추가
-        map.overlayMapTypes.setAt(0, landLayer);
+        // 기존에 혹시 남아있을지 모를 레이어를 깨끗이 비우고 추가
+        map.overlayMapTypes.clear(); 
+        map.overlayMapTypes.push(landLayer); // 최상단에 추가
+        
         btn.innerText = "🗺️ 지적도 보기: ON";
         btn.style.background = "#2ecc71";
     } else {
-        map.overlayMapTypes.removeAt(0);
+        // 레이어 제거
+        map.overlayMapTypes.clear();
+        
         btn.innerText = "🗺️ 지적도 보기: OFF";
         btn.style.background = "#8e44ad";
     }
