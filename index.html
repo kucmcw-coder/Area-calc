@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>면적 측정 웹앱</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { margin: 0; padding: 0; font-family: sans-serif; }
+        #map { height: 70vh; width: 100%; background: #eee; }
+        .search-container { padding: 10px; }
+        #pac-input { width: 90%; padding: 12px; font-size: 16px; border: 1px solid #ddd; border-radius: 4px; }
+        .info-panel { padding: 12px; background: #333; color: #fff; text-align: center; font-weight: bold; min-height: 45px; line-height: 1.5; }
+        .controls { padding: 10px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; background: #f4f4f4; }
+        button { padding: 12px 5px; cursor: pointer; border-radius: 5px; border: none; background: #007bff; color: white; font-weight: bold; font-size: 13px; }
+        button.reset { background: #dc3545; }
+        button.undo { background: #ffc107; color: black; }
+        button.secondary { background: #6c757d; }
+        #address-display { font-size: 13px; color: #ffd700; display: block; margin-top: 4px; }
+    </style>
+</head>
+<body>
+
+<div class="search-container">
+    <input id="pac-input" type="text" placeholder="장소를 검색하여 이동 및 주소 확인">
+</div>
+
+<div class="info-panel">
+    <span id="measurement-text">지도를 클릭하여 측정을 시작하세요.</span>
+    <span id="address-display">검색된 주소 정보가 여기에 표시됩니다.</span>
+</div>
+
+<div id="map"></div>
+
+<div class="controls">
+    <button onclick="undoLastPoint()" class="undo">↩ 한단계 취소</button>
+    <button onclick="clearMeasurements()" class="secondary">📏 측정치 초기화</button>
+    <button onclick="resetAll()" class="reset">🗑️ 전체 초기화</button>
+    <button onclick="startTracking()">🚶 위치 추적 시작</button>
+    <button onclick="stopTracking()" class="secondary">🛑 추적 종료</button>
+</div>
+
+<script>
+    let map, polygon, trackingPath, watchId = null;
+    let markers = [];
+    let pathCoordinates = [];
+
+    function initMap() {
+        const defaultLoc = { lat: 37.5665, lng: 126.9780 };
+        
+        map = new google.maps.Map(document.getElementById("map"), {
+            zoom: 17,
+            center: defaultLoc,
+            mapTypeId: 'hybrid',
+            gestureHandling: "greedy"
+        });
+
+        // 1. 현재 위치로 초기 이동 (주소 호출 없음 - 비용 절감)
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition((pos) => {
+                map.setCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+            });
+        }
+
+        // 2. 주소 검색 설정 (검색 시에만 주소 텍스트 업데이트)
+        const input = document.getElementById("pac-input");
+        const autocomplete = new google.maps.places.Autocomplete(input);
+        autocomplete.bindTo("bounds", map);
+        autocomplete.addListener("place_changed", () => {
+            const place = autocomplete.getPlace();
+            if (place.geometry) {
+                map.setCenter(place.geometry.location);
+                // 주소창에 검색된 정확한 명칭 표시
+                document.getElementById("address-display").innerText = "📍 " + (place.formatted_address || place.name);
+                addPoint(place.geometry.location);
+            }
+        });
+
+        polygon = new google.maps.Polygon({
+            strokeColor: "#FF0000",
+            strokeOpacity: 0.8,
+            strokeWeight: 2,
+            fillColor: "#FF0000",
+            fillOpacity: 0.3,
+            map: map
+        });
+
+        // 클릭 시 점만 추가 (주소 호출 API인 Geocoding 요청을 제거함)
+        map.addListener("click", (e) => addPoint(e.latLng));
+    }
+
+    function addPoint(latLng) {
+        const marker = new google.maps.Marker({ position: latLng, map: map });
+        markers.push(marker);
+        polygon.getPath().push(latLng);
+        updateDisplay();
+    }
+
+    function undoLastPoint() {
+        const path = polygon.getPath();
+        if (path.getLength() > 0) {
+            path.pop();
+            const lastMarker = markers.pop();
+            if (lastMarker) lastMarker.setMap(null);
+            updateDisplay();
+        }
+    }
+
+    function clearMeasurements() {
+        polygon.getPath().clear();
+        markers.forEach(m => m.setMap(null));
+        markers = [];
+        if (trackingPath) trackingPath.setMap(null);
+        updateDisplay();
+    }
+
+    function resetAll() {
+        clearMeasurements();
+        pathCoordinates = [];
+        if (watchId) stopTracking();
+        document.getElementById("measurement-text").innerText = "모든 측정 초기화됨";
+        document.getElementById("address-display").innerText = "검색된 주소 정보가 여기에 표시됩니다.";
+    }
+
+    function updateDisplay() {
+        const path = polygon.getPath();
+        const res = document.getElementById("measurement-text");
+        
+        if (path.getLength() > 2) {
+            const area = google.maps.geometry.spherical.computeArea(path);
+            res.innerText = `면적: ${area.toFixed(1)}㎡ (${(area * 0.3025).toFixed(1)}평)`;
+        } else if (path.getLength() === 2) {
+            const dist = google.maps.geometry.spherical.computeDistanceBetween(path.getAt(0), path.getAt(1));
+            res.innerText = `거리: ${dist.toFixed(1)}m`;
+        } else if (path.getLength() === 1) {
+            res.innerText = "다음 점을 찍으세요.";
+        } else {
+            res.innerText = "지도를 클릭하여 측정을 시작하세요.";
+        }
+    }
+
+    function startTracking() {
+        if (watchId) return;
+        pathCoordinates = [];
+        trackingPath = new google.maps.Polyline({ strokeColor: "#007bff", map: map });
+        watchId = navigator.geolocation.watchPosition((pos) => {
+            const cur = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            pathCoordinates.push(cur);
+            trackingPath.setPath(pathCoordinates);
+            map.setCenter(cur);
+        }, null, { enableHighAccuracy: true });
+        document.getElementById("measurement-text").innerText = "실시간 경로 추적 중...";
+    }
+
+    function stopTracking() {
+        if (watchId) {
+            navigator.geolocation.clearWatch(watchId);
+            watchId = null;
+            if (pathCoordinates.length > 2) {
+                const area = google.maps.geometry.spherical.computeArea(pathCoordinates);
+                document.getElementById("measurement-text").innerText = `추적 면적: ${area.toFixed(1)}㎡`;
+                new google.maps.Polygon({ paths: pathCoordinates, fillColor: "#007bff", map: map });
+            }
+        }
+    }
+</script>
+
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB78_9tya1d38NU2sR1OzU5e6zTySyIKWw&libraries=geometry,drawing,places&callback=initMap" async defer></script>
+
+</body>
+</html>
