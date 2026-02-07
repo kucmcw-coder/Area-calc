@@ -105,15 +105,19 @@
         });
 
         // VWorld 지적도 레이어 설정
-        landLayer = new google.maps.ImageMapType({
-            getTileUrl: function(coord, zoom) {
-                // LP_PA_CBND_BU_EDIT: 지적편집도 레이어 명칭
-                return `https://api.vworld.kr/req/wmts/1.0.0/EFCB2642-F3C4-3343-B8E6-F6D7BF27190B/LP_PA_CBND_BU_EDIT/${zoom}/${coord.y}/${coord.x}.png`;
-            },
-            tileSize: new google.maps.Size(256, 256),
-            opacity: 0.7,
-            isPng: true
-        });
+// 지적도 레이어 설정 (더 안정적인 주소로 교체)
+landLayer = new google.maps.ImageMapType({
+    getTileUrl: function(coord, zoom) {
+        // x, y 좌표 계산 방식 보정
+        const x = coord.x;
+        const y = coord.y;
+        // 최신 브이월드 WMTS 호출 규격
+        return `https://api.vworld.kr/req/wmts/1.0.0/EFCB2642-F3C4-3343-B8E6-F6D7BF27190B/Base/${zoom}/${y}/${x}.png?layer=LP_PA_CBND_BU_EDIT&style=default`;
+    },
+    tileSize: new google.maps.Size(256, 256),
+    opacity: 0.6,
+    isPng: true
+});
 
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition((pos) => {
